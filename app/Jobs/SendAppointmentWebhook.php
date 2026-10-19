@@ -7,6 +7,7 @@ use App\Models\WebhookEndpoint;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class SendAppointmentWebhook implements ShouldQueue
 {
@@ -40,7 +41,6 @@ class SendAppointmentWebhook implements ShouldQueue
                 ->post($endpoint->url);
 
             $this->recordDelivery($endpoint, $response->status(), $startedAt, $response->successful(), $response->body());
-            $response->throw();
         } catch (Throwable $exception) {
             if (! isset($response)) {
                 $this->recordDelivery($endpoint, null, $startedAt, false, $exception->getMessage());
@@ -52,6 +52,8 @@ class SendAppointmentWebhook implements ShouldQueue
 
     private function recordDelivery(WebhookEndpoint $endpoint, ?int $status, int $startedAt, bool $successful, string $response): void
     {
+        Log::info($this->event);
+
         WebhookDelivery::create([
             'webhook_endpoint_id' => $endpoint->id,
             'event_id' => $this->event['event_id'],

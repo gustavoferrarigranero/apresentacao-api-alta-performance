@@ -9,6 +9,7 @@ use App\Models\Appointment;
 use App\Models\WebhookEndpoint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -53,6 +54,7 @@ class AppointmentController extends Controller
 
             DB::afterCommit(function () use ($appointment, $event) {
                 WebhookEndpoint::query()
+                    ->distinct('url')
                     ->where('clinic_id', $appointment->clinic_id)
                     ->where('active', true)
                     ->each(
@@ -67,5 +69,15 @@ class AppointmentController extends Controller
         return new AppointmentResource(
             $appointment->load('patient:id,name')
         );
+    }
+
+    public function receiveWebhook(Request $request)
+    {
+        Log::info('Received webhook', [
+            'headers' => $request->headers->all(),
+            'body' => $request->getContent(),
+        ]);
+
+        return response()->json(['message' => 'Webhook received'], 201);
     }
 }
