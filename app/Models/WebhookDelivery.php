@@ -7,10 +7,18 @@ use Illuminate\Database\Eloquent\Model;
 class WebhookDelivery extends Model
 {
     protected $fillable = [
-        'webhook_event_id',
         'webhook_endpoint_id',
-        'status_code',
+        'event_id',
+        'event_name',
+        'attempt',
+        'response_status',
         'response_body',
-        'attempted_at'
+        'duration_ms',
+        'successful',
     ];
+
+    protected function casts(): array
+    {
+        return ['successful' => 'boolean'];
+    }
 }
