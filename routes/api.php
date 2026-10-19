@@ -9,6 +9,7 @@ Route::get('/health', fn () => ['status' => 'ok']);
 
 Route::group(['prefix' => 'v1'], function () {
     Route::get('/appointments', [AppointmentV1Controller::class, 'index']);
+    Route::post('/appointments', [AppointmentV1Controller::class, 'store']);
 });
 
 Route::group(['prefix' => 'v2'], function () {
