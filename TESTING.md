@@ -1,8 +1,8 @@
-# Roteiro de implementação — APIs de alta performance
+# Testes e roteiro da aula — APIs de alta performance
 
-Este é o projeto usado pelos alunos durante a aula. Ele contém a stack, o domínio ClinicFlow, banco, factories, seed e testes básicos, mas não contém a solução apresentada no projeto final.
+Todos os comandos deste documento devem ser executados na raiz do `projeto-final`.
 
-## Preparação do ambiente
+## Preparação
 
 ```bash
 nvm use
@@ -13,124 +13,140 @@ cp .env.example .env
 php artisan key:generate
 php artisan migrate:fresh --seed
 php artisan test
+```
+
+Inicie a aplicação:
+
+```bash
 php artisan serve
 ```
 
-Confirme o ponto de partida:
+Confirme a saúde da API:
 
 ```bash
 curl -i 'http://127.0.0.1:8000/api/health'
-php artisan route:list --path=api
 ```
 
-Antes do exercício, somente a rota de saúde deve representar a API da aula.
+## API Resource, payload e paginação
 
-## Verificação da stack
+Consulte a versão explícita por URL:
 
 ```bash
-php artisan test --filter=StackReadinessTest
+curl -i \
+  'http://127.0.0.1:8000/api/v1/appointments?clinic_id=1&per_page=5&status=scheduled'
 ```
 
-Esse teste garante que estão disponíveis:
+Verifique:
 
-- models, migrations, factories e seed do ClinicFlow;
-- tabelas de filas e falhas;
-- driver de fila em banco;
-- Laravel HTTP Client;
-- API Resources;
-- banco SQLite para desenvolvimento e testes.
+- somente os campos públicos aparecem no JSON;
+- cada paciente contém apenas `id` e `name`;
+- a resposta contém `data`, `links` e `meta`;
+- `meta.strategy` contém `cursor-pagination`;
+- `per_page=500` retorna 422.
 
-## Etapa 1 — Contrato com API Resource
+Execute os testes deste bloco:
 
-Objetivo: criar uma representação explícita de agendamento sem expor todas as colunas do model.
+```bash
+php artisan test --filter=AppointmentApiPerformanceTest
+```
 
-Passos da aula:
+## Versionamento por URL
 
-1. Gere `AppointmentResource`.
-2. Retorne `id`, `starts_at` e `status`.
-3. Inclua apenas `id` e `name` do paciente.
-4. Escreva o teste do contrato antes de criar a rota.
+```bash
+curl -i 'http://127.0.0.1:8000/api/v1/appointments?clinic_id=1'
+```
 
-Critério de conclusão: mudanças em colunas internas não alteram o JSON público.
+O endpoint deve retornar 200 e usar o contrato V1.
 
-## Etapa 2 — Consulta performática
+## Versionamento por Header
 
-Objetivo: construir a listagem sem N+1 e sem payload sem limite.
+```bash
+curl -i \
+  -H 'Accept: application/vnd.clinicflow.v1+json' \
+  'http://127.0.0.1:8000/api/appointments?clinic_id=1'
 
-Passos da aula:
+curl -i \
+  -H 'Accept: application/vnd.clinicflow.v2+json' \
+  'http://127.0.0.1:8000/api/appointments?clinic_id=1'
+```
 
-1. Crie um controller invocável para a listagem.
-2. Valide `clinic_id`, `status` e `per_page`.
-3. Selecione somente as colunas usadas pelo Resource.
-4. Carregue o paciente antecipadamente.
-5. Use paginação por cursor.
-6. Limite `per_page` a 100.
-7. Conte as queries executadas no teste.
+A versão V1 deve retornar 200. A versão não suportada deve retornar 406.
 
-Critério de conclusão: cinco ou cinquenta agendamentos devem manter um número limitado de consultas.
+## Configuração dos webhooks
 
-## Etapa 3 — Versionamento por URL
+Configure no `.env`:
 
-Objetivo: disponibilizar o primeiro contrato em `/api/v1/appointments`.
+```dotenv
+PARTNER_WEBHOOK_SECRET=lesson-secret
+```
 
-Passos da aula:
+Limpe o cache de configuração:
 
-1. Agrupe as rotas com o prefixo `v1`.
-2. Mantenha regras de negócio fora do agrupamento de versão.
-3. Adicione teste para o endpoint versionado.
+```bash
+php artisan config:clear
+```
 
-Critério de conclusão: `GET /api/v1/appointments?clinic_id=1` retorna o contrato V1.
+Registre um endpoint para a clínica criada pelo seed:
 
-## Etapa 4 — Versionamento por Header
+```bash
+php artisan tinker --execute="App\Models\WebhookEndpoint::create(['clinic_id' => 1, 'url' => 'http://127.0.0.1:8000/api/webhooks/partner', 'secret' => 'lesson-secret']);"
+```
 
-Objetivo: servir o contrato V1 pela URL estável `/api/appointments`.
+Em outro terminal, inicie a fila:
 
-Passos da aula:
+```bash
+php artisan queue:work --tries=5
+```
 
-1. Leia o header `Accept`.
-2. Aceite `application/vnd.clinicflow.v1+json`.
-3. Retorne 406 para uma versão desconhecida.
-4. Cubra os dois casos com testes.
+## Criação do agendamento e webhook de saída
 
-Critério de conclusão: o cliente escolhe a versão sem alterar a URL.
+```bash
+curl -i -X POST 'http://127.0.0.1:8000/api/v1/appointments' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{"clinic_id":1,"patient_id":1,"starts_at":"2027-01-15T14:30:00Z"}'
+```
 
-## Etapa 5 — Webhook de saída
+Verifique:
 
-Objetivo: publicar `appointment.created` sem bloquear a resposta da API.
+- a API retorna 201;
+- o evento contém `event_id`, `event`, `occurred_at` e `data`;
+- o envio ocorre pelo worker;
+- o header `X-Signature` contém a assinatura HMAC;
+- o cliente usa timeout curto;
+- o job possui cinco tentativas e backoff progressivo.
 
-Passos da aula:
+## Auditoria das entregas
 
-1. Crie tabelas para endpoints e tentativas de entrega.
-2. Crie o endpoint de cadastro do agendamento.
-3. Monte o evento com identificador único e dados mínimos.
-4. Despache o job depois do commit da transação.
-5. Assine o corpo JSON com HMAC SHA-256.
-6. Configure timeout curto.
-7. Configure cinco tentativas e backoff progressivo.
-8. Registre status, resposta, duração e número da tentativa.
+```bash
+php artisan tinker --execute="dump(App\Models\WebhookDelivery::latest()->first()?->toArray());"
+```
 
-Critério de conclusão: a API responde 201 antes de o sistema parceiro processar o evento.
+O registro deve apresentar:
 
-## Etapa 6 — Recebimento de webhook
+- identificador e nome do evento;
+- número da tentativa;
+- status da resposta;
+- corpo recebido;
+- duração em milissegundos;
+- indicação de sucesso ou falha.
 
-Objetivo: receber eventos externos com segurança e sem duplicar efeitos.
+## Recebimento e idempotência
 
-Passos da aula:
+```bash
+php artisan tinker --execute="dump(App\Models\WebhookEvent::latest()->first()?->toArray());"
+php artisan test --filter=AppointmentWebhookTest
+```
 
-1. Leia o corpo bruto da requisição.
-2. Calcule e compare a assinatura antes de interpretar o JSON.
-3. Valide o contrato do evento.
-4. Persista `event_id` com índice único.
-5. Despache o processamento somente para um evento novo.
-6. Retorne 204 também para repetições válidas.
+Os testes enviam o mesmo `event_id` mais de uma vez e comprovam que:
 
-Critério de conclusão: duas entregas com o mesmo `event_id` produzem um único registro e um único job.
+- assinatura inválida retorna 401;
+- entrega válida retorna 204;
+- repetição válida também retorna 204;
+- somente um evento é persistido;
+- somente um job de processamento é criado.
 
-## Comparação com o projeto final
-
-Depois de cada etapa, compare apenas os arquivos relacionados ao tema trabalhado. Evite copiar o projeto final inteiro, pois a sequência de implementação e os testes fazem parte do exercício.
-
-## Validação ao terminar a aula
+## Validação completa
 
 ```bash
 composer validate --no-check-publish
@@ -140,4 +156,10 @@ php artisan test
 php artisan route:list --path=api
 ```
 
-O resultado construído em aula deve alcançar os mesmos comportamentos e testes documentados no `TESTING.md` do projeto final.
+O projeto está pronto quando toda a suíte passa e as cinco rotas aparecem:
+
+- `GET /api/health`;
+- `GET /api/v1/appointments`;
+- `POST /api/v1/appointments`;
+- `GET /api/appointments`;
+- `POST /api/webhooks/partner`.

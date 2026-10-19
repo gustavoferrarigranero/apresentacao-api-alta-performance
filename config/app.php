@@ -123,4 +123,6 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'v2_hash' => env('APP_V2_HASH', 'default_hash_value')
+
 ];
