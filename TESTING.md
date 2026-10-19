@@ -134,7 +134,7 @@ O registro deve apresentar:
 ## Recebimento e idempotência
 
 ```bash
-php artisan tinker --execute="dump(App\Models\WebhookEvent::latest()->first()?->toArray());"
+php artisan tinker --execute="dump(App\Models\WebhookDelivery::latest()->first()?->toArray());"
 php artisan test --filter=AppointmentWebhookTest
 ```
 
